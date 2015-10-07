@@ -1,0 +1,255 @@
+<html>
+  <head>
+    <title> Computer Vision Automatting </title>
+    <script src='./bower_components/jquery/dist/jquery.min.js'></script>
+    <link rel='stylesheet' href='./bower_components/bootstrap/dist/css/bootstrap.min.css'></link>
+    <link rel='stylesheet' href='./bower_components/bootstrap/dist/css/bootstrap-theme.min.css'></link>
+    <script src="bower_components/bootstrap/dist/js/bootstrap.min.js"></script>
+    <style>
+    canvas{
+      cursor: crosshair;
+    }
+    .hidden-canvas{
+      margin-top:10px;
+      border-top:1px solid #ccc;
+      padding-top:10px;
+    }
+    </style>
+    <script>
+    $(window).ready(function(){
+      var canvas = $("#canvas")[0];
+      var context = canvas.getContext('2d');
+
+      var original = $("#original")[0];
+      var original_context = original.getContext('2d');
+      var fg_mat = $("#fg_mat")[0];
+      var fg_mat_context = fg_mat.getContext('2d');
+      var bg_mat = $("#bg_mat")[0];
+      var bg_mat_context = bg_mat.getContext('2d');
+
+      var targetCanvas = $("#target")[0];
+      var targetContext = targetCanvas.getContext('2d');
+
+      bg_mat.width = fg_mat.width = original.width = targetCanvas.width = canvas.width = 400;
+      bg_mat.height = fg_mat.height = original.height = targetCanvas.height = canvas.height = 400;
+
+      var lastX = null;
+      var lastY = null;
+      var lastT = -9999;
+
+      function reloadTarget(){
+        var img = new Image();
+        img.onload = function(){
+          targetContext.drawImage(img, 0,0);
+          setTimeout(reloadTarget, 500);
+        };
+        img.src = "/work/out.png?" + (new Date()).getTime();
+      }
+      reloadTarget();
+
+      var image_src = "/imgs/small/image1.jpg";
+      var images = ["/imgs/small/image1.jpg", "/imgs/small/image2.jpg", "/imgs/small/image3.jpg", "/imgs/small/image4.jpg",
+                    "/imgs/small/image5.jpg", "/imgs/small/image6.jpg", "/imgs/small/image7.jpg", "/imgs/small/image8.jpg",
+                    "/imgs/small/image9.jpg","/imgs/small/image10.jpg", "/imgs/small/image11.jpg"];
+
+      $(".image-button").click(function(){
+        var im = parseInt($(this).data('im'));
+        image_src = images[im];
+        clearCanvas(true);
+      });
+
+      var currentlySelectedColor = 'fg';
+
+      $("#fg-brush").click(function(){
+        currentlySelectedColor = 'fg';
+      });
+      $("#bg-brush").click(function(){
+        currentlySelectedColor = 'bg';
+      });
+      $("#rect").click(function(){
+        currentlySelectedColor = "rect";
+      });
+      $("#clear").click(function(){
+        clearCanvas();
+      });
+      $("#generate").click(function(){
+        $.post("/gen", {
+          "source": original.toDataURL('png'),
+          "fg_mat": fg_mat.toDataURL('png'),
+          "bg_mat": bg_mat.toDataURL('png')
+        }, function(data){
+          console.log(arguments);
+        });
+      });
+
+      function clearCanvas(loadNewImage){
+        if (loadNewImage === undefined) loadNewImage = true;
+        context.fillStyle = "#000";
+        context.fillRect(0,0,canvas.width,canvas.height);
+        fg_mat_context.fillStyle = "#000";
+        fg_mat_context.fillRect(0,0,canvas.width,canvas.height);
+        bg_mat_context.fillStyle = "#000";
+        bg_mat_context.fillRect(0,0,canvas.width,canvas.height);
+        if (loadNewImage){
+          var img = new Image();
+          img.onload = function(){
+            original_context.fillStyle = "#000";
+            original_context.fillRect(0,0,canvas.width,canvas.height);
+            original_context.drawImage(img, 0,0);
+            context.drawImage(img, 0,0);
+          };
+          img.src = image_src;
+        }else{
+          context.drawImage(original, 0,0);
+        }
+      }
+      clearCanvas();
+
+      var t = 0;
+      setInterval(function(){t+=1/60;}, 1000/60);
+
+      function draw(x,y){
+        if (t - lastT < .25 && lastX != null && lastY != null){
+          lastT = t;
+          var a = lastX - x;
+          var b = lastY - y;
+          var c = Math.sqrt(a*a + b*b);
+          for (var i = 0; i < c;i++){
+            drawSquare(x + a/c * i, y + b/c * i);
+          }
+        }else{
+          drawSquare(x,y);
+        }
+        lastX = x;
+        lastY = y;
+        lastT = t;
+      }
+
+      function drawSquare(x,y){
+        if (currentlySelectedColor == 'fg'){
+          context.fillStyle = "#0f0";
+          fg_mat_context.fillStyle = "#fff";
+          bg_mat_context.fillStyle = "#000";
+        }else{
+          context.fillStyle = "#f00";
+          fg_mat_context.fillStyle = "#000";
+          bg_mat_context.fillStyle = "#fff";
+        }
+        context.save();
+        fg_mat_context.save();
+        bg_mat_context.save();
+        context.translate(x,y);
+        fg_mat_context.translate(x,y);
+        bg_mat_context.translate(x,y);
+        context.fillRect(-5,-5,10,10);
+        fg_mat_context.fillRect(-5,-5,10,10);
+        bg_mat_context.fillRect(-5,-5,10,10);
+        context.restore();
+        fg_mat_context.restore();
+        bg_mat_context.restore();
+      }
+
+      var mousedown = false;
+      var initialX, initialY;
+      $(canvas).mousedown(function(e){
+        mousedown = true;
+        initialX = e.pageX - $(canvas).offset().left;
+        initialY = e.pageY - $(canvas).offset().top;
+      });
+      $(window).mouseup(function(e){
+        mousedown = false;
+        if (currentlySelectedColor == "rect"){
+          var endX = e.pageX - $(canvas).offset().left;
+          var endY = e.pageY - $(canvas).offset().top;
+          // Fill BG around rect area
+          clearCanvas(false);
+          context.save();
+          context.fillStyle = "#f00";
+          context.globalAlpha=  .5;
+          context.fillRect(0,0,canvas.width, initialY);
+          context.fillRect(0,0,initialX, canvas.height);
+          context.fillRect(0,endY,canvas.width, canvas.height - endY);
+          context.fillRect(endX,0,canvas.width -endX, canvas.height);
+          context.restore();
+
+          // Fill out BG
+          bg_mat_context.fillStyle = "#fff";
+          bg_mat_context.fillRect(0,0,canvas.width, canvas.height);
+          bg_mat_context.fillStyle = "#000";
+          bg_mat_context.fillRect(initialX, initialY, endX - initialX, endY - initialY);
+
+          currentlySelectedColor = "fg";
+
+
+        }
+      });
+      $(canvas).mousemove(function(e){
+        if (mousedown){
+          if (currentlySelectedColor != "rect"){
+            draw(e.pageX - $(canvas).offset().left, e.pageY - $(canvas).offset().top);
+          }else{
+            var endX = e.pageX - $(canvas).offset().left;
+            var endY = e.pageY - $(canvas).offset().top;
+            clearCanvas(false);
+            context.save();
+            context.fillStyle = "#f00";
+            context.globalAlpha=  .5;
+            context.fillRect(0,0,canvas.width, initialY);
+            context.fillRect(0,0,initialX, canvas.height);
+            context.fillRect(0,endY,canvas.width, canvas.height - endY);
+            context.fillRect(endX,0,canvas.width -endX, canvas.height);
+            context.restore();
+          }
+        }
+      });
+
+
+      console.log("Context Initialized");
+
+    });
+    </script>
+  </head>
+  <body>
+    <div class='fluid-container'>
+      <div class='row'>
+        <div class='col-xs-9'>
+          <canvas id='canvas'></canvas>
+          <canvas id='target'></canvas>
+        </div>
+        <div class='col-xs-3'>
+
+          <h3> Images </h3>
+
+          <button class='image-button' data-im='0'> Image 1 </button>
+          <button class='image-button' data-im='1'> Image 2 </button>
+          <button class='image-button' data-im='2'> Image 3 </button>
+          <button class='image-button' data-im='3'> Image 4 </button>
+          <button class='image-button' data-im='4'> Image 5 </button>
+          <button class='image-button' data-im='5'> Image 6 </button>
+          <button class='image-button' data-im='6'> Image 7 </button>
+          <button class='image-button' data-im='7'> Image 8 </button>
+          <button class='image-button' data-im='8'> Image 9 </button>
+          <button class='image-button' data-im='9'> Image 10 </button>
+          <button class='image-button' data-im='10'> Image 11 </button>
+
+          <h3> Brush </h3>
+
+          <button id='fg-brush'> Foreground </button>
+          <button id='bg-brush'> Background </button>
+          <button id='rect'> Rect (Click and drag) </button>
+
+          <h3> Operations </h3>
+
+          <button id='clear'> Clear </button>
+          <button id='generate'> Generate </button>
+
+        </div>
+      </div>
+    </div>
+    <div class='hidden-canvas'>
+      <canvas id='original'></canvas>
+      <canvas id='fg_mat'></canvas>
+      <canvas id='bg_mat'></canvas>
+    </div>
+  </body>
+</html>
